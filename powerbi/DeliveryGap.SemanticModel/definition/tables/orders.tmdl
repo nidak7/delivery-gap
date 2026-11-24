@@ -1,0 +1,207 @@
+table orders
+
+	measure 'Orders' = COUNTROWS(orders)
+		formatString: #,0
+
+	measure 'Late orders' = SUM(orders[late_flag])
+		formatString: #,0
+
+	measure 'Late rate' = DIVIDE([Late orders], [Orders])
+		formatString: 0.0%
+
+	measure 'Median days early' = MEDIAN(orders[days_early])
+		formatString: 0
+
+	measure 'Avg days promised' = AVERAGE(orders[promised_days])
+		formatString: 0.0
+
+	measure 'Avg delivery days' = AVERAGE(orders[delivery_days])
+		formatString: 0.0
+
+	measure 'Avg review' = AVERAGE(orders[review_score])
+		formatString: 0.00
+
+	measure 'Avg review (late)' = CALCULATE([Avg review], orders[late_flag] = 1)
+		formatString: 0.00
+
+	measure 'Avg review (on time)' = CALCULATE([Avg review], orders[late_flag] = 0)
+		formatString: 0.00
+
+	measure 'Low review share (1-2 stars)' = DIVIDE(CALCULATE(COUNTROWS(orders), orders[review_score] <= 2), COUNT(orders[review_score]))
+		formatString: 0.0%
+
+	measure 'Seller shipped late share' = DIVIDE(CALCULATE([Orders], orders[seller_ship] = "Seller shipped late"), [Orders])
+		formatString: 0.0%
+
+	measure 'Avg promise padding (days)' = AVERAGE(orders[days_early])
+		formatString: 0.0
+
+	measure 'Avg review (0-6 days early)' = CALCULATE([Avg review], orders[days_early] >= 0, orders[days_early] <= 6)
+		formatString: 0.00
+
+	measure 'Avg review (7+ days early)' = CALCULATE([Avg review], orders[days_early] >= 7)
+		formatString: 0.00
+
+	measure 'Review gain from 7+ days early' = [Avg review (7+ days early)] - [Avg review (0-6 days early)]
+		formatString: +0.00;-0.00;0.00
+
+	column order_id
+		dataType: string
+		summarizeBy: none
+		sourceColumn: order_id
+
+	column customer_state
+		dataType: string
+		summarizeBy: none
+		sourceColumn: customer_state
+
+	column seller_id
+		dataType: string
+		summarizeBy: none
+		sourceColumn: seller_id
+
+	column seller_state
+		dataType: string
+		summarizeBy: none
+		sourceColumn: seller_state
+
+	column category
+		dataType: string
+		summarizeBy: none
+		sourceColumn: category
+
+	column purchase_month
+		dataType: string
+		summarizeBy: none
+		sourceColumn: purchase_month
+
+	column delivery_days
+		dataType: int64
+		summarizeBy: none
+		sourceColumn: delivery_days
+
+	column promised_days
+		dataType: int64
+		summarizeBy: none
+		sourceColumn: promised_days
+
+	column days_early
+		dataType: int64
+		summarizeBy: none
+		sourceColumn: days_early
+
+	column is_late
+		dataType: string
+		summarizeBy: none
+		sourceColumn: is_late
+
+	column delivery_group
+		dataType: string
+		summarizeBy: none
+		sourceColumn: delivery_group
+
+	column seller_shipped_late
+		dataType: string
+		summarizeBy: none
+		sourceColumn: seller_shipped_late
+
+	column distance_km
+		dataType: double
+		formatString: #,0
+		summarizeBy: none
+		sourceColumn: distance_km
+
+	column review_score
+		dataType: double
+		formatString: 0
+		summarizeBy: none
+		sourceColumn: review_score
+
+	column month
+		dataType: string
+		summarizeBy: none
+		sourceColumn: month
+
+	column in_trend
+		dataType: int64
+		summarizeBy: none
+		sourceColumn: in_trend
+
+	column late_flag
+		dataType: int64
+		summarizeBy: none
+		sourceColumn: late_flag
+
+	column seller_ship
+		dataType: string
+		summarizeBy: none
+		sourceColumn: seller_ship
+
+	column distance_band_order
+		dataType: int64
+		summarizeBy: none
+		sourceColumn: distance_band_order
+
+	column distance_band
+		dataType: string
+		sortByColumn: distance_band_order
+		summarizeBy: none
+		sourceColumn: distance_band
+
+	column early_band_order
+		dataType: int64
+		summarizeBy: none
+		sourceColumn: early_band_order
+
+	column early_band
+		dataType: string
+		sortByColumn: early_band_order
+		summarizeBy: none
+		sourceColumn: early_band
+
+	column group_order
+		dataType: int64
+		summarizeBy: none
+		sourceColumn: group_order
+
+	column group_label
+		dataType: string
+		sortByColumn: group_order
+		summarizeBy: none
+		sourceColumn: group_label
+
+	column top15_category
+		dataType: int64
+		summarizeBy: none
+		sourceColumn: top15_category
+
+	column seller_orders = CALCULATE(COUNTROWS(orders), ALLEXCEPT(orders, orders[seller_id]))
+		dataType: int64
+		formatString: #,0
+		summarizeBy: none
+
+	partition orders = m
+		mode: import
+		source =
+				let
+					Source = Csv.Document(File.Contents(DataFile), [Delimiter=",", Encoding=65001, QuoteStyle=QuoteStyle.Csv]),
+					Promoted = Table.PromoteHeaders(Source, [PromoteAllScalars=true]),
+					Selected = Table.SelectColumns(Promoted, {"order_id", "customer_state", "seller_id", "seller_state", "category", "purchase_month", "delivery_days", "promised_days", "days_early", "is_late", "delivery_group", "seller_shipped_late", "distance_km", "review_score"}),
+					Blanks = Table.ReplaceValue(Selected, "", null, Replacer.ReplaceValue, {"distance_km", "review_score", "seller_shipped_late"}),
+					Typed = Table.TransformColumnTypes(Blanks, {{"order_id", type text}, {"customer_state", type text}, {"seller_id", type text}, {"seller_state", type text}, {"category", type text}, {"purchase_month", type text}, {"delivery_days", Int64.Type}, {"promised_days", Int64.Type}, {"days_early", Int64.Type}, {"is_late", type text}, {"delivery_group", type text}, {"seller_shipped_late", type text}, {"distance_km", type number}, {"review_score", type number}}, "en-US"),
+					CatCounts = Table.Group(Typed, {"category"}, {{"n", each Table.RowCount(_), Int64.Type}}),
+					TopCats = List.Buffer(Table.FirstN(Table.Sort(CatCounts, {{"n", Order.Descending}}), 15)[category]),
+					Add0 = Table.AddColumn(Typed, "month", each Text.Start([purchase_month], 7), type text),
+					Add1 = Table.AddColumn(Add0, "in_trend", each if [purchase_month] >= "2017-01-01" then 1 else 0, Int64.Type),
+					Add2 = Table.AddColumn(Add1, "late_flag", each if [is_late] = "t" then 1 else 0, Int64.Type),
+					Add3 = Table.AddColumn(Add2, "seller_ship", each if [seller_shipped_late] = "t" then "Seller shipped late" else if [seller_shipped_late] = "f" then "Seller shipped on time" else null, type text),
+					Add4 = Table.AddColumn(Add3, "distance_band_order", each if [distance_km] = null then null else if [distance_km] < 100 then 1 else if [distance_km] < 500 then 2 else if [distance_km] < 1000 then 3 else if [distance_km] < 2000 then 4 else 5, Int64.Type),
+					Add5 = Table.AddColumn(Add4, "distance_band", each if [distance_band_order] = null then null else {"0-100 km", "100-500 km", "500-1000 km", "1000-2000 km", "2000+ km"}{[distance_band_order] - 1}, type text),
+					Add6 = Table.AddColumn(Add5, "early_band_order", each if [days_early] < -7 then 1 else if [days_early] < 0 then 2 else if [days_early] <= 6 then 3 else if [days_early] <= 13 then 4 else if [days_early] <= 20 then 5 else if [days_early] <= 27 then 6 else 7, Int64.Type),
+					Add7 = Table.AddColumn(Add6, "early_band", each {"8+ days late", "1-7 days late", "0-6 early", "7-13 early", "14-20 early", "21-27 early", "28+ early"}{[early_band_order] - 1}, type text),
+					Add8 = Table.AddColumn(Add7, "group_order", each Number.FromText(Text.Start([delivery_group], 1)), Int64.Type),
+					Add9 = Table.AddColumn(Add8, "group_label", each Text.AfterDelimiter([delivery_group], ". "), type text),
+					Add10 = Table.AddColumn(Add9, "top15_category", each if List.Contains(TopCats, [category]) then 1 else 0, Int64.Type),
+					Result = Add10
+				in
+					Result
